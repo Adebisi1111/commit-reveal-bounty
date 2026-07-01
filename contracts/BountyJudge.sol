@@ -20,8 +20,9 @@ contract CommitRevealBounty {
         uint256 submissionDeadline;
         uint256 revealDeadline;
         uint256 prizeAmount;
+        bool judged;
         bool finalized;
-        address winner;
+        uint256 winnerIndex;
         uint256 totalSubmissions;
         uint256 totalRevealed;
     }
@@ -39,13 +40,15 @@ contract CommitRevealBounty {
     mapping(uint256 => Bounty) public bounties;
     mapping(uint256 => mapping(address => Commitment)) public commitments;
     mapping(uint256 => address[]) public revealedSubmitters;
+    mapping(uint256 => bytes) public judgeResults; // Store AI judge results
     
     // ─── Events ──────────────────────────────────────────────────────
     
     event BountyCreated(uint256 indexed bountyId, string title, uint256 submissionDeadline, uint256 revealDeadline);
     event CommitmentSubmitted(uint256 indexed bountyId, address indexed submitter, bytes32 commitment);
     event AnswerRevealed(uint256 indexed bountyId, address indexed submitter, string answer);
-    event WinnerFinalized(uint256 indexed bountyId, address indexed winner);
+    event Judged(uint256 indexed bountyId, bytes result);
+    event WinnerFinalized(uint256 indexed bountyId, uint256 indexed winnerIndex, address winner);
     
     // ─── Modifiers ───────────────────────────────────────────────────
     
@@ -96,8 +99,9 @@ contract CommitRevealBounty {
             submissionDeadline: submissionDeadline,
             revealDeadline: revealDeadline,
             prizeAmount: 0,
+            judged: false,
             finalized: false,
-            winner: address(0),
+            winnerIndex: 0,
             totalSubmissions: 0,
             totalRevealed: 0
         });
@@ -187,24 +191,48 @@ contract CommitRevealBounty {
     }
     
     /**
-     * @notice Finalize winner after AI judging
-     * @param bountyId The bounty to finalize
-     * @param winnerAddress The winner's address (determined by AI)
+     * @notice Submit AI judging results (called by owner after off-chain AI evaluation)
+     * @param bountyId The bounty to judge
+     * @param llmInput The AI judgment result (JSON with winnerIndex, ranking, etc.)
      */
-    function finalizeWinner(uint256 bountyId, address winnerAddress)
+    function judgeAll(uint256 bountyId, bytes calldata llmInput)
         external
         onlyOwner
         bountyExists(bountyId)
     {
         Bounty storage bounty = bounties[bountyId];
         require(block.timestamp > bounty.revealDeadline, "Reveal phase not ended");
+        require(!bounty.judged, "Already judged");
+        require(bounty.totalRevealed > 0, "No revealed answers to judge");
+        
+        bounty.judged = true;
+        judgeResults[bountyId] = llmInput;
+        
+        emit Judged(bountyId, llmInput);
+    }
+    
+    /**
+     * @notice Finalize winner after AI judging
+     * @param bountyId The bounty to finalize
+     * @param winnerIndex The index of the winner in revealedSubmitters array
+     */
+    function finalizeWinner(uint256 bountyId, uint256 winnerIndex)
+        external
+        onlyOwner
+        bountyExists(bountyId)
+    {
+        Bounty storage bounty = bounties[bountyId];
+        require(bounty.judged, "Not judged yet");
         require(!bounty.finalized, "Already finalized");
+        require(winnerIndex < revealedSubmitters[bountyId].length, "Invalid winner index");
+        
+        address winnerAddress = revealedSubmitters[bountyId][winnerIndex];
         require(commitments[bountyId][winnerAddress].revealed, "Winner didn't reveal");
         
         bounty.finalized = true;
-        bounty.winner = winnerAddress;
+        bounty.winnerIndex = winnerIndex;
         
-        emit WinnerFinalized(bountyId, winnerAddress);
+        emit WinnerFinalized(bountyId, winnerIndex, winnerAddress);
     }
     
     // ─── View Functions ──────────────────────────────────────────────
@@ -251,5 +279,25 @@ contract CommitRevealBounty {
         } else {
             return 3; // Judging phase
         }
+    }
+    
+    /**
+     * @notice Get the winner address for a finalized bounty
+     * @param bountyId The bounty ID
+     * @return winner The winner's address
+     */
+    function getWinner(uint256 bountyId) external view returns (address winner) {
+        Bounty storage bounty = bounties[bountyId];
+        require(bounty.finalized, "Not finalized");
+        return revealedSubmitters[bountyId][bounty.winnerIndex];
+    }
+    
+    /**
+     * @notice Get the AI judgment result for a bounty
+     * @param bountyId The bounty ID
+     * @return result The judgment result bytes
+     */
+    function getJudgeResult(uint256 bountyId) external view returns (bytes memory result) {
+        return judgeResults[bountyId];
     }
 }

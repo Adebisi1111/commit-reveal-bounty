@@ -178,3 +178,49 @@ MIT License
 
 - Discord: [Ritual Discord](https://discord.gg/ritual)
 - Docs: [Ritual Documentation](https://docs.ritualfoundation.org)
+
+## 🔮 Ritual Integration
+
+### How Ritual Supports Private AI Evaluation
+
+This bounty system is designed to integrate with Ritual's infrastructure for **private, verifiable AI judging**:
+
+#### 1. TEE-Backed Execution
+- Ritual's Trusted Execution Environment (TEE) allows AI to **judge submissions privately**
+- The TEE sees all plaintext answers but **never exposes them to the public chain**
+- This prevents participants from learning others' answers before judging is complete
+
+#### 2. Encrypted Inputs/Secrets
+- Participant answers can be **encrypted for the TEE** before submission
+- The contract stores only **encrypted references** or **commitment hashes**
+- Plaintext answers exist **only inside the TEE** during judging
+
+#### 3. Batch Judging
+- All submissions are judged **together in one AI request** (not one call per answer)
+- This is more efficient and prevents timing attacks
+- The LLM receives all answers simultaneously for fair comparison
+
+#### 4. Human-in-the-Loop Finalization
+- AI **recommends** a winner based on evaluation criteria
+- The bounty owner **finalizes** the payout (not automatic)
+- This ensures human oversight and prevents AI errors from causing unfair payouts
+
+#### 5. On-Chain vs Off-Chain
+
+| Component | Location | Reason |
+|-----------|----------|--------|
+| Commitment hashes | On-chain | Proves submission exists |
+| Encrypted answers | On-chain (if small) or off-chain reference | Privacy |
+| Plaintext answers | TEE only (during judging) | Never public until reveal |
+| AI judgment result | On-chain | Verifiable |
+| Winner selection | On-chain | Final record |
+
+#### 6. Why This Matters
+
+> "The commit-reveal pattern solves the immediate problem of answer copying. But Ritual's TEE-backed execution takes it further — answers can stay encrypted until the AI judges them, and the AI can evaluate data that should never be public before the judging phase."
+
+This creates a truly **privacy-preserving bounty system** where:
+- ✅ Submissions are hidden during evaluation
+- ✅ AI judges fairly without information leakage
+- ✅ Results are verifiable on-chain
+- ✅ Human oversight prevents AI errors

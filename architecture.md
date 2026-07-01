@@ -121,3 +121,55 @@ To integrate with Ritual's TEE:
 ## Conclusion
 
 This architecture provides a solid foundation for privacy-preserving bounty systems. The commit-reveal pattern ensures fair competition while maintaining verifiability. Integration with Ritual's TEE would add additional privacy guarantees for the advanced track.
+
+## Commit-Reveal vs Ritual-Native Encrypted Submissions
+
+### Comparison Table
+
+| Aspect | Commit-Reveal (Required) | Ritual-Native (Advanced) |
+|--------|--------------------------|--------------------------|
+| **Privacy Level** | Medium (answers hidden until reveal) | High (answers hidden until judging) |
+| **Complexity** | Low (standard Solidity) | High (requires TEE integration) |
+| **Chain Compatibility** | Any EVM chain | Ritual-specific |
+| **Answer Visibility** | Public after reveal | Private until judging |
+| **AI Judging** | Off-chain after reveal | In-TEE during judging |
+| **Gas Cost** | Low | Higher (encryption overhead) |
+| **Verifiability** | Hash verification | TEE attestation |
+
+### How They Work
+
+#### Commit-Reveal (What We Built)
+```
+1. Submit: keccak256(answer, salt, sender, bountyId) → on-chain
+2. Wait: Submission deadline passes
+3. Reveal: answer + salt → verified against hash → on-chain
+4. Judge: AI evaluates revealed answers → off-chain
+5. Finalize: Winner selected → on-chain
+```
+
+#### Ritual-Native (Advanced Track)
+```
+1. Submit: encrypt(answer, TEE_public_key) → on-chain or off-chain reference
+2. Wait: Submission deadline passes
+3. Judge: TEE decrypts all answers → AI evaluates → result on-chain
+4. Reveal: All answers published together with winner
+5. Finalize: Winner selected → on-chain
+```
+
+### Key Differences
+
+| Feature | Commit-Reveal | Ritual-Native |
+|---------|---------------|---------------|
+| **When answers become public** | After reveal phase | After judging |
+| **Who sees plaintext** | Everyone (after reveal) | Only TEE (during judging) |
+| **Information leakage** | Possible (if reveal is early) | None (until judging complete) |
+| **Implementation** | Simple Solidity | TEE + encryption |
+| **Trust model** | Trust hash verification | Trust TEE attestation |
+
+### Recommendation
+
+For most bounty systems, **commit-reveal is sufficient** and much simpler to implement. Use Ritual-native encrypted submissions when:
+- Answers contain highly sensitive information
+- The bounty requires maximum privacy guarantees
+- You're already building on Ritual infrastructure
+- You need TEE-backed verifiability

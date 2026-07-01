@@ -286,3 +286,141 @@ describe("CommitRevealBounty", function () {
     });
   });
 });
+
+  describe("AI Judging (judgeAll)", function () {
+    let bountyId;
+    let commitment1;
+    let commitment2;
+
+    beforeEach(async function () {
+      const tx = await bountyContract.createBounty(
+        BOUNTY_TITLE,
+        BOUNTY_DESC,
+        SUBMISSION_DURATION,
+        REVEAL_DURATION
+      );
+      const receipt = await tx.wait();
+      bountyId = receipt.events.find(e => e.event === "BountyCreated").args.bountyId;
+
+      // Create commitments
+      commitment1 = ethers.utils.keccak256(
+        ethers.utils.solidityPack(
+          ["string", "bytes32", "address", "uint256"],
+          [ANSWER_1, SALT_1, submitter1.address, bountyId]
+        )
+      );
+      commitment2 = ethers.utils.keccak256(
+        ethers.utils.solidityPack(
+          ["string", "bytes32", "address", "uint256"],
+          [ANSWER_2, SALT_2, submitter2.address, bountyId]
+        )
+      );
+
+      // Submit commitments
+      await bountyContract.connect(submitter1).submitCommitment(bountyId, commitment1);
+      await bountyContract.connect(submitter2).submitCommitment(bountyId, commitment2);
+
+      // Fast forward to reveal phase
+      await ethers.provider.send("evm_increaseTime", [SUBMISSION_DURATION + 1]);
+      await ethers.provider.send("evm_mine");
+
+      // Reveal answers
+      await bountyContract.connect(submitter1).revealAnswer(bountyId, ANSWER_1, SALT_1);
+      await bountyContract.connect(submitter2).revealAnswer(bountyId, ANSWER_2, SALT_2);
+
+      // Fast forward past reveal phase
+      await ethers.provider.send("evm_increaseTime", [REVEAL_DURATION + 1]);
+      await ethers.provider.send("evm_mine");
+    });
+
+    it("Should store AI judgment result", async function () {
+      const llmInput = ethers.utils.toUtf8Bytes(JSON.stringify({
+        winnerIndex: 0,
+        ranking: [{ index: 0, score: 94, reason: "Best answer" }]
+      }));
+
+      await expect(
+        bountyContract.judgeAll(bountyId, llmInput)
+      )
+        .to.emit(bountyContract, "Judged")
+        .withArgs(bountyId, llmInput);
+
+      const bounty = await bountyContract.getBounty(bountyId);
+      expect(bounty.judged).to.be.true;
+    });
+
+    it("Should reject judging before reveal phase ends", async function () {
+      // Create new bounty and try to judge immediately
+      const tx = await bountyContract.createBounty(
+        BOUNTY_TITLE,
+        BOUNTY_DESC,
+        SUBMISSION_DURATION,
+        REVEAL_DURATION
+      );
+      const receipt = await tx.wait();
+      const newBountyId = receipt.events.find(e => e.event === "BountyCreated").args.bountyId;
+
+      const llmInput = ethers.utils.toUtf8Bytes("{}");
+      await expect(
+        bountyContract.judgeAll(newBountyId, llmInput)
+      ).to.be.revertedWith("Reveal phase not ended");
+    });
+
+    it("Should reject double judging", async function () {
+      const llmInput = ethers.utils.toUtf8Bytes("{}");
+      await bountyContract.judgeAll(bountyId, llmInput);
+      
+      await expect(
+        bountyContract.judgeAll(bountyId, llmInput)
+      ).to.be.revertedWith("Already judged");
+    });
+
+    it("Should reject non-owner judging", async function () {
+      const llmInput = ethers.utils.toUtf8Bytes("{}");
+      await expect(
+        bountyContract.connect(nonOwner).judgeAll(bountyId, llmInput)
+      ).to.be.revertedWith("Not owner");
+    });
+
+    it("Should finalize winner by index after judging", async function () {
+      const llmInput = ethers.utils.toUtf8Bytes(JSON.stringify({
+        winnerIndex: 0,
+        ranking: [{ index: 0, score: 94, reason: "Best answer" }]
+      }));
+      await bountyContract.judgeAll(bountyId, llmInput);
+
+      await expect(
+        bountyContract.finalizeWinner(bountyId, 0)
+      )
+        .to.emit(bountyContract, "WinnerFinalized")
+        .withArgs(bountyId, 0, submitter1.address);
+
+      const bounty = await bountyContract.getBounty(bountyId);
+      expect(bounty.finalized).to.be.true;
+      expect(bounty.winnerIndex).to.equal(0);
+    });
+
+    it("Should reject finalization before judging", async function () {
+      await expect(
+        bountyContract.finalizeWinner(bountyId, 0)
+      ).to.be.revertedWith("Not judged yet");
+    });
+
+    it("Should get winner address", async function () {
+      const llmInput = ethers.utils.toUtf8Bytes("{}");
+      await bountyContract.judgeAll(bountyId, llmInput);
+      await bountyContract.finalizeWinner(bountyId, 1);
+
+      const winner = await bountyContract.getWinner(bountyId);
+      expect(winner).to.equal(submitter2.address);
+    });
+
+    it("Should get judge result", async function () {
+      const llmInput = ethers.utils.toUtf8Bytes(JSON.stringify({ winnerIndex: 0 }));
+      await bountyContract.judgeAll(bountyId, llmInput);
+
+      const result = await bountyContract.getJudgeResult(bountyId);
+      expect(result).to.equal(llmInput);
+    });
+  });
+});
